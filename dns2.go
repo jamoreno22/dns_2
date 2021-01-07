@@ -153,8 +153,11 @@ func (s *DNSServer) Spread(ctx context.Context, lg *lab3.Log) (*lab3.Message, er
 
 //GetIP server side
 func (s *DNSServer) GetIP(ctx context.Context, cmd *lab3.Command) (*lab3.PageInfo, error) {
-
-	return &lab3.PageInfo{}, nil
+	for _, s := range vectors {
+		if s.Name == cmd.Domain {
+			return lab3.PageInfo{PageIp: cmd.Ip, Rv: s, DnsIP: "10.10.28.18:8000"}, nil
+		}
+	}
 }
 
 /*
