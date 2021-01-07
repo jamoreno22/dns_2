@@ -7,10 +7,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
-	lab3 "github.com/jamoreno22/dns_1/pkg/proto"
+	lab3 "github.com/jamoreno22/dns_2/pkg/proto"
 	"google.golang.org/grpc"
 )
 
@@ -19,12 +21,13 @@ type DNSServer struct {
 	lab3.UnimplementedDNSServer
 }
 
-var vectors []lab3.VectorClock
+var vectors []*lab3.VectorClock
 
-//clock  := time.Now()
+var lg, _ = os.Create("log")
+var wg sync.WaitGroup
 
-func main() {
-
+func server() {
+	defer wg.Done()
 	// create a listener on TCP port 8000
 	lis, err := net.Listen("tcp", "10.10.28.18:8000")
 	if err != nil {
@@ -39,7 +42,47 @@ func main() {
 	if err := grpcDNSServer.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %s", err)
 	}
+}
 
+func spread() {
+	defer wg.Done()
+	for {
+		var conn1 *grpc.ClientConn
+
+		conn1, err1 := grpc.Dial("10.10.28.17", grpc.WithInsecure())
+		if err1 != nil {
+			log.Fatalf("did not connect: %s", err1)
+		}
+
+		dnsc1 := lab3.NewDNSClient(conn1)
+
+		var conn2 *grpc.ClientConn
+
+		conn2, err2 := grpc.Dial("10.10.28.19", grpc.WithInsecure())
+		if err2 != nil {
+			log.Fatalf("did not connect: %s", err2)
+		}
+
+		dnsc2 := lab3.NewDNSClient(conn2)
+		for {
+			time.Sleep(5 * time.Minute)
+			logFile, _ := ioutil.ReadFile("lg")
+			dnsc1.Spread(context.Background(), &lab3.Log{Name: "Log DNS2", Data: logFile})
+			dnsc2.Spread(context.Background(), &lab3.Log{Name: "Log DNS2", Data: logFile})
+		}
+	}
+
+}
+
+func main() {
+	runtime.GOMAXPROCS(2)
+
+	wg.Add(2)
+
+	go server()
+	go spread()
+
+	wg.Wait()
 }
 
 func isError(err error) bool {
@@ -53,6 +96,13 @@ func isError(err error) bool {
 // Action server side
 func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.VectorClock, error) {
 
+	var registerLog, err3 = os.OpenFile("log", os.O_RDWR, 0644)
+	if isError(err3) {
+		fmt.Printf("File opening error")
+
+	}
+	defer registerLog.Close()
+
 	switch cmd.Action {
 	case 1: //Create
 		// check if file exists
@@ -61,7 +111,7 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 		// create file if not exists
 		if os.IsNotExist(err) {
 			var file, err1 = os.Create("ZF/" + cmd.Domain)
-			vectors = append(vectors, lab3.VectorClock{Name: cmd.Domain, Rv1: 0, Rv2: 0, Rv3: 0})
+			vectors = append(vectors, &lab3.VectorClock{Name: cmd.Domain, Rv1: 0, Rv2: 0, Rv3: 0})
 			if isError(err1) {
 				fmt.Printf("File creation error")
 			}
@@ -79,6 +129,10 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 		if isError(err) {
 			fmt.Printf("File writing error")
 
+		}
+		_, err = registerLog.WriteString("Create " + cmd.Option + " " + cmd.Parameter)
+		if isError(err) {
+			fmt.Printf("log writing error")
 		}
 
 	case 2: //Update
@@ -104,6 +158,11 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 			log.Fatalln(err)
 		}
 
+		_, err = registerLog.WriteString("Update " + cmd.Option + " " + cmd.Parameter)
+		if isError(err) {
+			fmt.Printf("log writing error")
+		}
+
 	case 3: //Delete
 		input, err := ioutil.ReadFile("ZF/" + cmd.Domain)
 		if err != nil {
@@ -126,28 +185,25 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 		if err != nil {
 			log.Fatalln(err)
 		}
+
+		_, err = registerLog.WriteString("Delete " + cmd.Name)
+		if isError(err) {
+			fmt.Printf("log writing error")
+		}
 	}
 
 	for _, s := range vectors {
-		if s.Name == cdm.Domain {
+		if s.Name == cmd.Domain {
 			s.Rv2++
 			return s, nil
 		}
 	}
+	return &lab3.VectorClock{}, nil
 }
 
 //Spread server side
 func (s *DNSServer) Spread(ctx context.Context, lg *lab3.Log) (*lab3.Message, error) {
 
-	// Client connections to anothers dns servers
-
-	for {
-		time.Sleep(5 * time.Minute)
-		break
-		//send log to dns servers
-		//check vector clocks
-		//erase log
-	}
 	return &lab3.Message{Text: "asdf"}, nil
 }
 
@@ -155,13 +211,8 @@ func (s *DNSServer) Spread(ctx context.Context, lg *lab3.Log) (*lab3.Message, er
 func (s *DNSServer) GetIP(ctx context.Context, cmd *lab3.Command) (*lab3.PageInfo, error) {
 	for _, s := range vectors {
 		if s.Name == cmd.Domain {
-			return lab3.PageInfo{PageIp: cmd.Ip, Rv: s, DnsIP: "10.10.28.18:8000"}, nil
+			return &lab3.PageInfo{PageIp: cmd.Ip, Rv: s, DnsIP: "10.10.28.18:8000"}, nil
 		}
 	}
+	return &lab3.PageInfo{}, nil
 }
-
-/*
-	Crear el archivo log para registrar los cambios en el servidor y añadirlo a una variable global
-	Añadir los relojes de vector de cada registro ZF
-	Solucionar el problema de las conexiones entre DNS sin llamar a la función desde un servidor no DNS
-*/
