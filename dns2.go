@@ -19,6 +19,8 @@ type DNSServer struct {
 	lab3.UnimplementedDNSServer
 }
 
+var vectors []lab3.VectorClock
+
 //clock  := time.Now()
 
 func main() {
@@ -59,6 +61,7 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 		// create file if not exists
 		if os.IsNotExist(err) {
 			var file, err1 = os.Create("ZF/" + cmd.Domain)
+			vectors = append(vectors, lab3.VectorClock{Name: cmd.Domain, Rv1: 0, Rv2: 0, Rv3: 0})
 			if isError(err1) {
 				fmt.Printf("File creation error")
 			}
@@ -125,7 +128,12 @@ func (s *DNSServer) Action(ctx context.Context, cmd *lab3.Command) (*lab3.Vector
 		}
 	}
 
-	return &lab3.VectorClock{Rv1: 1, Rv2: 0, Rv3: 0}, nil
+	for _, s := range vectors {
+		if s.Name == cdm.Domain {
+			s.Rv2++
+			return s, nil
+		}
+	}
 }
 
 //Spread server side
