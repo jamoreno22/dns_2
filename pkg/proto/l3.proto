@@ -9,6 +9,8 @@ service DNS {
     rpc Ping(Message) returns (Message){}
     rpc Action(Command) returns (VectorClock){}
     rpc Spread(Log) returns (Message){}
+    rpc GetIP(Command) returns (PageInfo){}
+
 
 }
 
